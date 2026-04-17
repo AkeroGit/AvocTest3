@@ -751,6 +751,25 @@ def deinitialize(audioHolder: AudioHolder):
 
 
 def main() -> None:
+    avocDataDir = os.environ.get("AVOC_DATA_DIR")
+    
+    # Verify portable mode
+    if not avocDataDir:
+        print("=" * 60, file=sys.stderr)
+        print("WARNING: AVOC_DATA_DIR not set!", file=sys.stderr)
+        print("=" * 60, file=sys.stderr)
+        print("", file=sys.stderr)
+        print("This application should be launched via the provided", file=sys.stderr)
+        print("launcher script to ensure portable operation.", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Linux: Run ./bin/avoc instead of calling Python directly", file=sys.stderr)
+        print("Windows: Run .\\bin\\avoc.cmd instead of calling Python directly", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Data will be written to system locations:", file=sys.stderr)
+        print(f"  {QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation)}", file=sys.stderr)
+        print("", file=sys.stderr)
+        input("Press Enter to continue anyway (not recommended)...")
+    
     # MUST set these BEFORE QApplication for QSettings to use correct paths
     QCoreApplication.setOrganizationName("AVocOrg")
     QCoreApplication.setApplicationName("AVoc")
