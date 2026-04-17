@@ -751,7 +751,11 @@ def deinitialize(audioHolder: AudioHolder):
 
 
 def main() -> None:
-    # Keep QSettings inside AVOC_DATA_DIR when it is provided.
+    # MUST set these BEFORE QApplication for QSettings to use correct paths
+    QCoreApplication.setOrganizationName("AVocOrg")
+    QCoreApplication.setApplicationName("AVoc")
+    
+    # Now configure portable settings if requested
     avocDataDir = os.environ.get("AVOC_DATA_DIR")
     if avocDataDir is not None and avocDataDir != "":
         settingsDir = os.path.join(avocDataDir, "settings")
@@ -762,12 +766,16 @@ def main() -> None:
             QSettings.Scope.UserScope,
             settingsDir,
         )
+        # Also eliminate native format to prevent registry writes on Windows
+        QSettings.setDefaultFormat(QSettings.Format.IniFormat)
 
+    # Now create the application
     app = QApplication(sys.argv)
     app.setDesktopFileName("AVoc")
-    app.setOrganizationName("AVocOrg")
-    app.setApplicationName("AVoc")
-
+    # Remove these - already set above:
+    # app.setOrganizationName("AVocOrg")
+    # app.setApplicationName("AVoc")
+    
     iconFilePath = os.path.join(os.path.dirname(__file__), "AVoc.svg")
     icon = QIcon()
     icon.addFile(iconFilePath)
