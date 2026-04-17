@@ -9,10 +9,10 @@ if [[ $# -eq 0 ]]; then
     echo "AVoc Installer"
     echo "=============="
     echo ""
-    echo "Press 0 to use current directory"
-    echo "Press 1 to enter custom path"
+    echo " Press 0 to use current directory"
+    echo " Press 1 to enter custom path"
     read -p "[0/1]: " choice
-    
+
     if [[ "$choice" == "0" ]]; then
         PREFIX="$(pwd)/avoc-install"
         echo "Using current directory: $PREFIX"
@@ -59,9 +59,14 @@ mkdir -p "$PREFIX/bin"
 cat > "$PREFIX/bin/avoc" << 'EOF'
 #!/bin/bash
 AVOC_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export AVOC_HOME="$AVOC_ROOT"
+export AVOC_DATA_DIR="$AVOC_ROOT/data"
 exec "$AVOC_ROOT/.venv/bin/python" -m avoc "$@"
 EOF
 chmod +x "$PREFIX/bin/avoc"
+
+# Create data directory
+mkdir -p "$PREFIX/data"
 
 # Create uninstaller
 cat > "$PREFIX/bin/uninstall" << 'EOF'
