@@ -22,13 +22,10 @@ if [[ $# -eq 0 ]]; then
     echo "AVoc Installer"
     echo "=============="
     echo ""
-    echo "Press 0 to use current directory"
-    echo "Press 1 to enter custom path"
-    read -p "[0/1]: " choice
+    read -p "Use current directory (0) or custom path (1)? [0/1]: " choice
 
     if [[ "$choice" == "0" ]]; then
         PREFIX="$(pwd)/avoc-install"
-        echo "Using current directory: $PREFIX"
     else
         read -p "Enter installation directory [$HOME/.local/opt/avoc]: " custom_path
         PREFIX="${custom_path:-$HOME/.local/opt/avoc}"
@@ -40,16 +37,8 @@ fi
 # Ask about shortcuts
 if [[ "$NO_SHORTCUTS" == false ]]; then
     echo ""
-    echo "Create system shortcuts? [y/N]: "
-    read -p "" shortcut_choice
-    
-    if [[ "$shortcut_choice" =~ ^[Yy]$ ]]; then
-        NO_SHORTCUTS=false
-        echo "Shortcuts will be created."
-    else
-        NO_SHORTCUTS=true
-        echo "Self-contained mode selected."
-    fi
+    read -p "Create system shortcuts? [y/N]: " shortcut_choice
+    [[ "$shortcut_choice" =~ ^[Yy]$ ]] || NO_SHORTCUTS=true
 fi
 
 # Resolve absolute path
@@ -70,18 +59,21 @@ fi
 
 export PATH="$UV_DIR:$PATH"
 
-# Install Python 3.12.3
+# Install Python
 echo "Installing Python 3.12.3..."
 mkdir -p "$UV_PYTHON_INSTALL_DIR"
 uv python install 3.12.3 2>/dev/null || true
 
 # Find Python
 PYTHON_EXE=""
-if [ -x "$UV_PYTHON_INSTALL_DIR/bin/python3.12" ]; then
-    PYTHON_EXE="$UV_PYTHON_INSTALL_DIR/bin/python3.12"
-elif [ -x "$HOME/.local/bin/python3.12" ]; then
-    PYTHON_EXE="$HOME/.local/bin/python3.12"
-else
+for py_path in "$UV_PYTHON_INSTALL_DIR/bin/python3.12" "$UV_PYTHON_INSTALL_DIR/python3.12" "$HOME/.local/bin/python3.12"; do
+    if [ -x "$py_path" ]; then
+        PYTHON_EXE="$py_path"
+        break
+    fi
+done
+
+if [ -z "$PYTHON_EXE" ]; then
     echo "Error: Python 3.12 not found"
     exit 1
 fi
@@ -93,18 +85,17 @@ VENV_DIR="$PREFIX/.venv"
 echo "Creating virtual environment..."
 uv venv --python "$PYTHON_EXE" "$VENV_DIR"
 
-# Install avoc
-echo "Installing AVoc..."
-uv pip install --python "$VENV_DIR/bin/python" "$SCRIPT_DIR"
-
-# Create data directory
-mkdir -p "$PREFIX/data"
-
 # ============================================
-# CREATE LAUNCHER (with .sh extension and executable)
+# KEY CHANGE: Install with pinned requirements
 # ============================================
+echo "Installing exact dependency versions from requirements-3.12.3.txt..."
+uv pip install -r "$SCRIPT_DIR/requirements-3.12.3.txt" --python "$VENV_DIR/bin/python"
+
+# Install avoc package itself (no deps, already installed from requirements)
+uv pip install --no-deps --python "$VENV_DIR/bin/python" "$SCRIPT_DIR"
+
+# Create launcher
 mkdir -p "$PREFIX/bin"
-
 cat > "$PREFIX/bin/avoc.sh" << 'EOF'
 #!/bin/bash
 AVOC_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -113,48 +104,45 @@ export AVOC_DATA_DIR="$AVOC_ROOT/data"
 exec "$AVOC_ROOT/.venv/bin/avoc" "$@"
 EOF
 
-# Make it executable (THIS IS THE IMPORTANT PART)
 chmod +x "$PREFIX/bin/avoc.sh"
-
-# Also create a symlink without .sh for convenience (optional)
 ln -sf "$PREFIX/bin/avoc.sh" "$PREFIX/bin/avoc" 2>/dev/null || true
 
-# ============================================
+# Create data directory
+mkdir -p "$PREFIX/data"
 
-# Create uninstaller ( tracks leaks )
-cat > "$PREFIX/bin/uninstall.sh" << 'EOF'
+# Create uninstaller
 #!/bin/bash
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "AVoc Uninstaller"
 echo "================"
+echo "Location: $ROOT"
 echo ""
 
-# Check for files outside install directory
 found=0
+
+# Qt settings
 for check_path in "$HOME/.local/share/AVocOrg" "$HOME/.config/AVocOrg"; do
     if [ -e "$check_path" ]; then
-        echo "  Found: $check_path"
+        echo "Found: $check_path"
         found=1
     fi
 done
 
-# Python symlink from uv
-PYTHON_SYMLINK="$HOME/.local/bin/python3.12"
-if [ -L "$PYTHON_SYMLINK" ]; then
-    LINK_TARGET=$(readlink -f "$PYTHON_SYMLINK" 2>/dev/null)
-    if [[ "$LINK_TARGET" == "$ROOT"* ]]; then
-        echo "  Found uv symlink: $PYTHON_SYMLINK"
-        rm -f "$PYTHON_SYMLINK" && echo "    Removed"
+# Python symlinks (all variants)
+for pylink in "$HOME/.local/bin/python3.12" "$HOME/.local/bin/python3" "$HOME/.local/bin/python"; do
+    if [ -L "$pylink" ]; then
+        target=$(readlink -f "$pylink" 2>/dev/null)
+        if [[ "$target" == "$ROOT"* ]]; then
+            rm -f "$pylink" && echo "Removed: $pylink"
+        fi
     fi
-fi
+done
 
 # System shortcuts
 if [ -f "$ROOT/install-manifest.txt" ]; then
     while IFS= read -r line; do
-        if [[ -f "$line" ]] || [[ -d "$line" ]]; then
-            rm -rf "$line" 2>/dev/null && echo "  Removed: $line"
-        fi
+        rm -rf "$line" 2>/dev/null && echo "Removed: $line"
     done < "$ROOT/install-manifest.txt"
     rm -f "$ROOT/install-manifest.txt"
 fi
@@ -162,46 +150,13 @@ fi
 read -p "Remove AVoc from $ROOT? [y/N] " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    rm -rf "$ROOT"
-    echo "AVoc removed."
-fi
-EOF
-
-chmod +x "$PREFIX/bin/uninstall.sh"
-ln -sf "$PREFIX/bin/uninstall.sh" "$PREFIX/bin/uninstall" 2>/dev/null || true
-
-# Track shortcuts if any
-MANIFEST_FILE="$PREFIX/install-manifest.txt"
-> "$MANIFEST_FILE"
-
-if [[ "$NO_SHORTCUTS" == false ]]; then
-    echo "Creating system shortcuts..."
-    
-    DESKTOP_FILE="$HOME/.local/share/applications/avoc.desktop"
-    mkdir -p "$(dirname "$DESKTOP_FILE")"
-    
-    cat > "$DESKTOP_FILE" << EOF
-[Desktop Entry]
-Name=AVoc
-Exec=$PREFIX/bin/avoc.sh
-Icon=$PREFIX/.venv/lib/python3.12/site-packages/avoc/AVoc.svg
-Type=Application
-Terminal=false
-Categories=Audio;AudioVideo;
-EOF
-    
-    echo "$DESKTOP_FILE" >> "$MANIFEST_FILE"
-    
-    if command -v update-desktop-database &> /dev/null; then
-        update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
-    fi
+    rm -rf "$ROOT" && echo "AVoc removed."
+    [ $found -eq 1 ] && echo "Note: config files remain in ~/.config/AVocOrg"
 fi
 
 echo ""
 echo "=============================================="
 echo "Installation Complete!"
 echo "=============================================="
-echo "Location: $PREFIX"
-echo "Run: $PREFIX/bin/avoc.sh  (or $PREFIX/bin/avoc)"
-echo "Uninstall: $PREFIX/bin/uninstall.sh"
+echo "Run: $PREFIX/bin/avoc.sh"
 echo "=============================================="
