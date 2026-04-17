@@ -72,10 +72,40 @@ mkdir -p "$PREFIX/data"
 cat > "$PREFIX/bin/uninstall" << 'EOF'
 #!/bin/bash
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+echo "AVoc Uninstaller"
+echo "================"
+echo ""
+
+# Check for leaks BEFORE removal
+echo "Checking for configuration files that will remain..."
+found=0
+
+for check_path in "$HOME/.local/share/AVocOrg" "$HOME/.config/AVocOrg" "$HOME/.config/AVoc.ini" "$HOME/.config/AVoc.conf"; do
+    if [ -e "$check_path" ]; then
+        echo "  Found: $check_path"
+        found=1
+    fi
+done
+
+if [ $found -eq 1 ]; then
+    echo ""
+    echo "WARNING: Some files exist outside the install folder."
+    echo "Consider removing them manually after uninstall:"
+    echo "  rm -rf ~/.local/share/AVocOrg ~/.config/AVocOrg ~/.config/AVoc*"
+    echo ""
+fi
+
 read -p "Remove AVoc from $ROOT? [y/N] " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    rm -rf "$ROOT" && echo "AVoc removed."
+    rm -rf "$ROOT" 
+    echo "AVoc removed."
+    
+    if [ $found -eq 1 ]; then
+        echo ""
+        echo "Remember to clean up remaining files (see warning above)."
+    fi
 fi
 EOF
 chmod +x "$PREFIX/bin/uninstall"
