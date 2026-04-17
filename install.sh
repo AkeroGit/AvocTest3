@@ -309,22 +309,25 @@ fi
 # =============================================================================
 # INSTALL DEPENDENCIES
 # =============================================================================
-echo "[5/6] Installing dependencies..."
+echo "[5/6] Installing dependencies and app..."
 
 cd "$APP_DIR"
 
 if [[ -f "uv.lock" ]]; then
+    # Install dependencies from lock file
     "$UV_DIR/uv" sync --frozen --python "$VENV_DIR/bin/python"
+    
+    # Install avoc itself so "import avoc" works
+    "$UV_DIR/uv" pip install --python "$VENV_DIR/bin/python" -e "$APP_DIR"
 else
     echo "ERROR: uv.lock required for reproducible install" >&2
     exit 1
 fi
 
-# Optional: Verify without failing (CUDA might warn but work)
-if ! "$VENV_DIR/bin/python" -c "import voiceconversion; print('voiceconversion OK')" 2>/dev/null; then
-    echo "WARNING: voiceimport check failed (may be CUDA-related)" >&2
-    echo "Installation completed, but verify manually with:" >&2
-    echo "  $VENV_DIR/bin/python -c 'import voiceconversion'" >&2
+# Verify it works
+if ! "$VENV_DIR/bin/python" -c "import avoc" 2>/dev/null; then
+    echo "ERROR: avoc package not importable" >&2
+    exit 1
 fi
 
 # =============================================================================
