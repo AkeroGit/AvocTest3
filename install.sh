@@ -81,7 +81,7 @@ echo "Installing Python 3.12.3..."
 mkdir -p "$UV_PYTHON_INSTALL_DIR"
 
 # Try to install to portable location
-uv python install 3.12.3 2>/dev/null || true
+uv python install --install-dir "$UV_PYTHON_INSTALL_DIR" 3.12.3 2>/dev/null || true
 
 # Find where Python was actually installed
 PYTHON_EXE=""
