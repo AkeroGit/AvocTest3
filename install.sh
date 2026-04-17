@@ -17,6 +17,7 @@ UV_DIR_NAME=".uv"
 PYTHON_DIR_NAME=".python"
 CACHE_DIR_NAME=".cache"
 APP_DIR_NAME="app"
+TEMP_DIR_NAME=".install-temp-$$"  # PID-suffixed for uniqueness
 
 # =============================================================================
 # PATH RESOLUTION
@@ -106,10 +107,12 @@ if [[ -z "$PREFIX" ]]; then
             ;;
     esac
     
+    # >>>>> SHORTCUT QUESTION INSERT
     echo ""
     read -p "Create desktop shortcut? [Y/n] " -n 1 -r
     echo ""
     [[ $REPLY =~ ^[Nn]$ ]] && NO_SHORTCUTS=1 || NO_SHORTCUTS=0
+    # <<<<< END SHORTCUT QUESTION
 fi
 
 # =============================================================================
@@ -124,9 +127,24 @@ case "$PREFIX" in
         ;;
 esac
 
-# Create and canonicalize prefix
+# Create prefix early (needed for temp containment)
 mkdir -p "$PREFIX"
 PREFIX="$(cd "$PREFIX" && pwd)"
+
+# =============================================================================
+# CONTAINED TEMPORARY DIRECTORY
+# =============================================================================
+# CRITICAL: All temp files stay inside $PREFIX for true containment
+TEMP_DIR="$PREFIX/$TEMP_DIR_NAME"
+mkdir -p "$TEMP_DIR"
+
+# Cleanup function - removes temp dir on exit
+cleanup_temp() {
+    if [[ -d "$TEMP_DIR" ]]; then
+        rm -rf "$TEMP_DIR"
+    fi
+}
+trap cleanup_temp EXIT
 
 echo "Installing AVoc to: $PREFIX"
 echo ""
@@ -170,30 +188,31 @@ fi
 # =============================================================================
 # SETUP ISOLATED ENVIRONMENT
 # =============================================================================
-# CRITICAL: All UV/Python environments isolated to $PREFIX
-
 export UV_DIR="$PREFIX/$UV_DIR_NAME"
 export UV_CACHE_DIR="$PREFIX/$CACHE_DIR_NAME"
 export UV_PYTHON_INSTALL_DIR="$PREFIX/$PYTHON_DIR_NAME"
 export UV_PYTHON="$UV_PYTHON_INSTALL_DIR/cpython-$REQUIRED_PYTHON_VERSION-linux-x86_64-gnu/bin/python3"
 
-# Ensure these directories exist
+# Create directories
 mkdir -p "$UV_CACHE_DIR"
 mkdir -p "$UV_PYTHON_INSTALL_DIR"
 
 # =============================================================================
-# INSTALL UV (Self-Contained)
+# INSTALL UV (Self-Contained, No External Temp Files)
 # =============================================================================
 echo "[1/6] Installing uv (package manager)..."
 
 if [[ ! -f "$UV_DIR/uv" ]]; then
-    echo "Downloading uv (direct binary, no system symlinks)..."
-    UV_TEMP="$(mktemp -d)"
-    trap "rm -rf '$UV_TEMP'" EXIT
+    echo "Downloading uv (direct binary, fully contained)..."
+    
+    # Use contained temp directory instead of mktemp
+    UV_TEMP="$TEMP_DIR/uv-download"
+    mkdir -p "$UV_TEMP"
     
     # Direct binary download - no install.sh = no ~/.local/bin/uv symlink
     UV_VERSION="0.6.0"
     UV_ARCH="x86_64-unknown-linux-gnu"
+    
     curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${UV_ARCH}.tar.gz" \
         | tar -xz -C "$UV_TEMP"
     
@@ -201,8 +220,8 @@ if [[ ! -f "$UV_DIR/uv" ]]; then
     mv "$UV_TEMP/uv" "$UV_DIR/"
     mv "$UV_TEMP/uvx" "$UV_DIR/" 2>/dev/null || true
     
+    # Cleanup happens automatically via trap, but we can be eager here
     rm -rf "$UV_TEMP"
-    trap - EXIT
 fi
 
 export PATH="$UV_DIR:$PATH"
@@ -218,14 +237,13 @@ fi
 # =============================================================================
 echo "[2/6] Installing Python $REQUIRED_PYTHON_VERSION..."
 
-# Install Python only if not already present
 if [[ ! -f "$UV_PYTHON" ]]; then
     "$UV_DIR/uv" python install "$REQUIRED_PYTHON_VERSION" \
         --python-preference only-managed \
         --install-dir "$UV_PYTHON_INSTALL_DIR"
 fi
 
-# Verify Python version (optional)
+# Verify Python version
 if [[ $SKIP_VERIFY -eq 0 ]]; then
     INSTALLED_VERSION=$("$UV_PYTHON" --version 2>&1 | cut -d' ' -f2)
     if [[ "$INSTALLED_VERSION" != "$REQUIRED_PYTHON_VERSION" ]]; then
@@ -239,11 +257,8 @@ fi
 echo "[3/6] Creating virtual environment..."
 
 VENV_DIR="$PREFIX/$VENV_DIR_NAME"
-
-# Use the managed Python to create venv
 "$UV_PYTHON" -m venv "$VENV_DIR"
 
-# Verify venv was created
 if [[ ! -f "$VENV_DIR/bin/python" ]]; then
     echo "ERROR: Failed to create virtual environment" >&2
     exit 1
@@ -271,22 +286,20 @@ else
 fi
 
 # =============================================================================
-# INSTALL DEPENDENCIES (Using Lock File)
+# INSTALL DEPENDENCIES
 # =============================================================================
 echo "[5/6] Installing dependencies..."
 
 cd "$APP_DIR"
 
-# CRITICAL: Use uv sync with frozen lock for reproducibility
 if [[ -f "uv.lock" ]]; then
-    # --frozen ensures exact versions from lock file
     "$UV_DIR/uv" sync --frozen --python "$VENV_DIR/bin/python"
 else
     echo "ERROR: uv.lock required for reproducible install" >&2
     exit 1
 fi
 
-# Verify voiceconversion is installed
+# Verify voiceconversion
 if ! "$VENV_DIR/bin/python" -c "import voiceconversion" 2>/dev/null; then
     echo "ERROR: voiceconversion package not installed correctly" >&2
     exit 1
@@ -301,10 +314,8 @@ mkdir -p "$PREFIX/bin"
 
 cat > "$PREFIX/bin/avoc" << 'LAUNCHER_EOF'
 #!/bin/bash
-# AVoc Launcher - Auto-generated
 set -e
 
-# Resolve script location (handle symlinks)
 SCRIPT_SOURCE="${BASH_SOURCE[0]}"
 while [[ -L "$SCRIPT_SOURCE" ]]; do
     SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
@@ -313,15 +324,11 @@ while [[ -L "$SCRIPT_SOURCE" ]]; do
 done
 PREFIX="$(cd "$(dirname "$SCRIPT_SOURCE")/.." && pwd)"
 
-# Set environment
 export AVOC_HOME="$PREFIX"
 export AVOC_DATA_DIR="$PREFIX/data"
 export PATH="$PREFIX/.uv:$PATH"
 
-# Ensure data directory exists
 mkdir -p "$AVOC_DATA_DIR"
-
-# Launch application
 exec "$PREFIX/.venv/bin/python" -m avoc "$@"
 LAUNCHER_EOF
 
@@ -337,11 +344,8 @@ mkdir -p "$PREFIX/data"
 # =============================================================================
 cat > "$PREFIX/bin/uninstall" << 'UNINSTALL_EOF'
 #!/bin/bash
-# AVoc Uninstaller
-
 set -euo pipefail
 
-# Resolve PREFIX from script location
 SCRIPT_SOURCE="${BASH_SOURCE[0]}"
 while [[ -L "$SCRIPT_SOURCE" ]]; do
     SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
@@ -357,13 +361,11 @@ echo ""
 echo "Target: $PREFIX"
 echo ""
 
-# Safety checks
 if [[ ! -d "$PREFIX/.venv" ]] && [[ ! -d "$PREFIX/app" ]]; then
     echo "ERROR: Does not appear to be an AVoc installation" >&2
     exit 1
 fi
 
-# Check if running
 if pgrep -f "avoc" >/dev/null 2>&1; then
     echo "WARNING: AVoc appears to be running."
     read -p "Force uninstall? [y/N] " -n 1 -r
@@ -374,7 +376,6 @@ if pgrep -f "avoc" >/dev/null 2>&1; then
     fi
 fi
 
-# Confirmation
 read -p "Remove AVoc completely? [y/N] " -n 1 -r
 echo ""
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -384,19 +385,19 @@ fi
 
 echo "Removing files..."
 
-# Remove global symlinks that point to our installation
+# >>>>> SYMLINK CLEANUP INSERT
 for link in "$HOME/.local/bin/uv" "$HOME/.local/bin/python3.12" "$HOME/.local/bin/python3"; do
     if [[ -L "$link" ]]; then
         target="$(readlink "$link" 2>/dev/null || true)"
         if [[ "$target" == *"$PREFIX"* ]] || [[ "$target" == *"/.uv/"* ]] || [[ "$target" == *"/.python/"* ]]; then
-            printf "  %-30s ... " "removing global symlink $(basename "$link")"
-            rm -f "$link" && echo "OK" || echo "FAIL"
+            printf "  %-40s ... " "global symlink $(basename "$link")"
+            rm -f "$link" && echo "removed" || echo "failed"
         fi
     fi
 done
 echo ""
+# <<<<< END SYMLINK CLEANUP
 
-# Remove known directories (safer than rm -rf $PREFIX)
 declare -a REMOVE_DIRS=(
     "$PREFIX/.venv"
     "$PREFIX/.uv"
@@ -418,7 +419,6 @@ for dir in "${REMOVE_DIRS[@]}"; do
     fi
 done
 
-# Remove desktop shortcut if exists
 DESKTOP_FILE="$HOME/.local/share/applications/avoc.desktop"
 if [[ -f "$DESKTOP_FILE" ]]; then
     printf "  %-40s ... " "desktop shortcut"
@@ -429,15 +429,19 @@ if [[ -f "$DESKTOP_FILE" ]]; then
     fi
 fi
 
-# Try to remove prefix directory if empty
+# Clean up temp directory if still present
+if [[ -d "$PREFIX/.install-temp-"* ]]; then
+    rm -rf "$PREFIX/.install-temp-"* 2>/dev/null || true
+fi
+
 if [[ -z "$(ls -A "$PREFIX" 2>/dev/null)" ]]; then
     rmdir "$PREFIX" 2>/dev/null || true
     echo ""
     echo "AVoc uninstalled. $PREFIX removed."
 else
     echo ""
-    echo "AVoc uninstalled. Some files remain in $PREFIX:"
-    ls -la "$PREFIX"
+    echo "AVoc uninstalled. Some files may remain:"
+    ls -la "$PREFIX" 2>/dev/null || true
 fi
 UNINSTALL_EOF
 
@@ -465,11 +469,16 @@ EOF
     
     echo "Created desktop shortcut: $DESKTOP_FILE"
     
-    # Update desktop database (optional, best effort)
     if command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
     fi
 fi
+
+# =============================================================================
+# FINAL CLEANUP
+# =============================================================================
+# Remove temp directory explicitly (trap will also handle this)
+rm -rf "$TEMP_DIR" 2>/dev/null || true
 
 # =============================================================================
 # COMPLETION
