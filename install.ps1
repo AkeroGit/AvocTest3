@@ -62,7 +62,7 @@ $LauncherCmd = @"
 @echo off
 set "AVOC_HOME=$Prefix"
 set "AVOC_DATA_DIR=$Prefix\data"
-"%AVOC_HOME%\.venv\Scripts\python.exe" -m avoc %*
+"%AVOC_HOME%\.venv\Scripts\avoc.exe" %*
 "@
 
 $LauncherCmd | Set-Content -Path (Join-Path $BinDir "avoc.cmd")
