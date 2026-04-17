@@ -105,6 +105,11 @@ if [[ -z "$PREFIX" ]]; then
             exit 1
             ;;
     esac
+    
+    echo ""
+    read -p "Create desktop shortcut? [Y/n] " -n 1 -r
+    echo ""
+    [[ $REPLY =~ ^[Nn]$ ]] && NO_SHORTCUTS=1 || NO_SHORTCUTS=0
 fi
 
 # =============================================================================
@@ -182,15 +187,22 @@ mkdir -p "$UV_PYTHON_INSTALL_DIR"
 echo "[1/6] Installing uv (package manager)..."
 
 if [[ ! -f "$UV_DIR/uv" ]]; then
-    # Download uv to temp first (atomic move)
+    echo "Downloading uv (direct binary, no system symlinks)..."
     UV_TEMP="$(mktemp -d)"
     trap "rm -rf '$UV_TEMP'" EXIT
     
-    curl -LsSf https://astral.sh/uv/install.sh | \
-        UV_UNMANAGED_INSTALL="$UV_TEMP" sh
+    # Direct binary download - no install.sh = no ~/.local/bin/uv symlink
+    UV_VERSION="0.6.0"
+    UV_ARCH="x86_64-unknown-linux-gnu"
+    curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${UV_ARCH}.tar.gz" \
+        | tar -xz -C "$UV_TEMP"
     
-    # Atomic move to final location
-    mv "$UV_TEMP" "$UV_DIR"
+    mkdir -p "$UV_DIR"
+    mv "$UV_TEMP/uv" "$UV_DIR/"
+    mv "$UV_TEMP/uvx" "$UV_DIR/" 2>/dev/null || true
+    
+    rm -rf "$UV_TEMP"
+    trap - EXIT
 fi
 
 export PATH="$UV_DIR:$PATH"
@@ -371,6 +383,18 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
 fi
 
 echo "Removing files..."
+
+# Remove global symlinks that point to our installation
+for link in "$HOME/.local/bin/uv" "$HOME/.local/bin/python3.12" "$HOME/.local/bin/python3"; do
+    if [[ -L "$link" ]]; then
+        target="$(readlink "$link" 2>/dev/null || true)"
+        if [[ "$target" == *"$PREFIX"* ]] || [[ "$target" == *"/.uv/"* ]] || [[ "$target" == *"/.python/"* ]]; then
+            printf "  %-30s ... " "removing global symlink $(basename "$link")"
+            rm -f "$link" && echo "OK" || echo "FAIL"
+        fi
+    fi
+done
+echo ""
 
 # Remove known directories (safer than rm -rf $PREFIX)
 declare -a REMOVE_DIRS=(
