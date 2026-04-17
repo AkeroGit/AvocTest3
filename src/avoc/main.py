@@ -806,6 +806,10 @@ def main() -> None:
 
     exitStatus = app.exec()
 
+    exitStatus = app.exec()
+    
+    # Explicit sync to ensure INI file is written
+    QSettings().sync()
+    
     deinitialize(audioHolder)
-
     sys.exit(exitStatus)
