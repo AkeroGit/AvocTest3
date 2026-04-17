@@ -805,8 +805,6 @@ def main() -> None:
     splash.finish(window)
 
     exitStatus = app.exec()
-
-    exitStatus = app.exec()
     
     # Explicit sync to ensure INI file is written
     QSettings().sync()
