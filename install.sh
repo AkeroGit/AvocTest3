@@ -9,14 +9,14 @@ if [[ $# -eq 0 ]]; then
     echo "AVoc Installer"
     echo "=============="
     echo ""
-    read -p "Use custom path (1) or current directory (0)? [1/0]: " -n 1 -r
-    echo ""
-
-    if [[ "$REPLY" == "0" ]]; then
+    echo "Press 0 to use current directory"
+    echo "Press 1 to enter custom path"
+    read -p "[0/1]: " choice
+    
+    if [[ "$choice" == "0" ]]; then
         PREFIX="$(pwd)/avoc-install"
         echo "Using current directory: $PREFIX"
     else
-        # Default to custom path entry
         read -p "Enter installation directory [$HOME/.local/opt/avoc]: " custom_path
         PREFIX="${custom_path:-$HOME/.local/opt/avoc}"
     fi
@@ -24,16 +24,33 @@ else
     PREFIX="$1"
 fi
 
+# Resolve absolute path
 mkdir -p "$PREFIX"
+PREFIX="$(cd "$PREFIX" && pwd)"
+echo "Installing AVoc to: $PREFIX"
 
-# Install Python 3.12.3 specifically (not latest)
+# Bootstrap uv
+UV_DIR="$PREFIX/.uv"
+export UV_CACHE_DIR="$PREFIX/cache"
+export UV_PYTHON_INSTALL_DIR="$PREFIX/python"
+
+if [[ ! -f "$UV_DIR/uv" ]]; then
+    echo "Downloading uv..."
+    mkdir -p "$UV_DIR"
+    curl -LsSf https://astral.sh/uv/install.sh | UV_UNMANAGED_INSTALL="$UV_DIR" sh
+fi
+
+export PATH="$UV_DIR:$PATH"
+
+# Install Python 3.12.3
 echo "Installing Python 3.12.3..."
 uv python install 3.12.3
 
+# Create venv
 VENV_DIR="$PREFIX/.venv"
 uv venv --python 3.12.3 "$VENV_DIR"
 
-# Install avoc
+# Install avoc (voiceconversion from PyPI automatically, uses uv.lock)
 echo "Installing AVoc..."
 uv pip install --python "$VENV_DIR/bin/python" "$SCRIPT_DIR"
 
@@ -63,5 +80,6 @@ echo "=============================================="
 echo "Installation Complete!"
 echo "=============================================="
 echo "Location: $PREFIX"
-echo "Python: 3.12.3"
 echo "Run: $PREFIX/bin/avoc"
+echo "Uninstall: $PREFIX/bin/uninstall"
+echo "=============================================="
