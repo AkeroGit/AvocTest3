@@ -125,7 +125,7 @@ cat > "$PREFIX/bin/avoc" << 'EOF'
 AVOC_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export AVOC_HOME="$AVOC_ROOT"
 export AVOC_DATA_DIR="$AVOC_ROOT/data"
-exec "$AVOC_ROOT/.venv/bin/python" -m avoc "$@"
+exec "$AVOC_ROOT/.venv/bin/avoc" "$@"
 EOF
 chmod +x "$PREFIX/bin/avoc"
 
