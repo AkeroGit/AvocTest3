@@ -205,31 +205,52 @@ echo "[1/6] Installing uv (package manager)..."
 if [[ ! -f "$UV_DIR/uv" ]]; then
     echo "Downloading uv (direct binary, fully contained)..."
     
-    # Use contained temp directory instead of mktemp
+    # Use contained temp directory
     UV_TEMP="$TEMP_DIR/uv-download"
     mkdir -p "$UV_TEMP"
     
-    # Direct binary download - no install.sh = no ~/.local/bin/uv symlink
     UV_VERSION="0.6.0"
     UV_ARCH="x86_64-unknown-linux-gnu"
+    UV_TARBALL="$UV_TEMP/uv.tar.gz"
     
-    curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${UV_ARCH}.tar.gz" \
-        | tar -xz -C "$UV_TEMP"
+    # Download to file first (better error handling than pipe)
+    if ! curl -fsSL \
+        "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${UV_ARCH}.tar.gz" \
+        -o "$UV_TARBALL"; then
+        echo "ERROR: Failed to download uv" >&2
+        exit 1
+    fi
+    
+    # Extract
+    if ! tar -xzf "$UV_TARBALL" -C "$UV_TEMP"; then
+        echo "ERROR: Failed to extract uv" >&2
+        exit 1
+    fi
+    
+    # Debug: Show what we got
+    echo "Downloaded files:"
+    ls -la "$UV_TEMP/"
+    
+    # Find the uv binary (might be in subdirectory)
+    UV_BINARY=$(find "$UV_TEMP" -name "uv" -type f | head -n1)
+    if [[ -z "$UV_BINARY" ]]; then
+        echo "ERROR: uv binary not found in archive" >&2
+        exit 1
+    fi
     
     mkdir -p "$UV_DIR"
-    mv "$UV_TEMP/uv" "$UV_DIR/"
-    mv "$UV_TEMP/uvx" "$UV_DIR/" 2>/dev/null || true
     
-    # Cleanup happens automatically via trap, but we can be eager here
+    # Move binaries to final location
+    mv "$UV_BINARY" "$UV_DIR/uv"
+    
+    # Also try to find uvx
+    UVX_BINARY=$(find "$UV_TEMP" -name "uvx" -type f | head -n1)
+    if [[ -n "$UVX_BINARY" ]]; then
+        mv "$UVX_BINARY" "$UV_DIR/uvx"
+    fi
+    
+    # Cleanup
     rm -rf "$UV_TEMP"
-fi
-
-export PATH="$UV_DIR:$PATH"
-
-# Verify uv works
-if ! "$UV_DIR/uv" --version >/dev/null 2>&1; then
-    echo "ERROR: uv installation failed" >&2
-    exit 1
 fi
 
 # =============================================================================
